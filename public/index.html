@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sequence Diagram Editor</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.13.6/underscore-min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.3.0/raphael.min.js"></script>
+  <script src="https://bramp.github.io/js-sequence-diagrams/js/sequence-diagram-min.js"></script>
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <div class="header-content">
+        <div class="logo-section">
+          <h1>Sequence Diagram Editor</h1>
+          <p class="subtitle">Create UML sequence diagrams</p>
+        </div>
+        <div class="header-actions">
+          <span class="version">v1.0</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="main-content">
+      <div class="editor-panel" id="editorPanel">
+        <div class="panel-header">
+          <h3 class="panel-title">📝 Diagram Source</h3>
+        </div>
+        <div class="toolbar">
+          <div class="toolbar-group">
+            <input type="file" id="fileInput" accept=".txt,.seq" style="display: none;">
+            <button id="loadBtn" class="btn btn-secondary">📁 Load</button>
+            <input type="text" id="filenameInput" placeholder="filename.txt" class="filename-input">
+            <button id="saveBtn" class="btn btn-primary">💾 Save</button>
+          </div>
+          <div class="toolbar-group">
+            <button id="renderBtn" class="btn btn-success">🚀 Render</button>
+          </div>
+        </div>
+
+        <textarea id="diagramText" class="editor" placeholder="Enter sequence diagram syntax here...
+
+Example:
+Title: Example Sequence Diagram
+
+Alice->Bob: Hello Bob, how are you?
+Note right of Bob: Bob thinksfc
+Bob-->Alice: I am good thanks!"></textarea>
+      </div>
+
+      <div class="resizer" id="resizer"></div>
+
+      <div class="diagram-panel" id="diagramPanel">
+        <div class="panel-header">
+          <h3 class="panel-title">🎨 Diagram Preview</h3>
+        </div>
+        <div class="toolbar">
+          <div class="toolbar-group">
+            <div class="theme-selector-wrapper">
+              <select id="themeSelect" class="theme-select">
+                <option value="simple">Simple →</option>
+                <option value="hand">Hand-drawn 〰</option>
+              </select>
+            </div>
+            <input type="text" id="imageFilename" placeholder="diagram.png" class="filename-input">
+            <button id="savePngBtn" class="btn btn-primary">📷 Export PNG</button>
+          </div>
+          <div class="toolbar-info">
+            <span class="hint">💡 Click diagram to copy to clipboard</span>
+          </div>
+        </div>
+
+        <div id="diagram" class="diagram-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="notification" class="notification"></div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>

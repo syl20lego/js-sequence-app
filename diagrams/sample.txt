@@ -1,0 +1,7 @@
+Title: Sample Sequence Diagram
+
+Alice->Bob: Authentication Request
+Note right of Bob: Bob thinks about it
+Bob-->Alice: Authentication Response
+Alice->John: Another request
+John-->Alice: Another response
