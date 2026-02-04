@@ -45,7 +45,7 @@ const elements = {
   renderBtn: document.getElementById('renderBtn'),
   filenameInput: document.getElementById('filenameInput'),
   imageFilename: document.getElementById('imageFilename'),
-  themeSelect: document.getElementById('themeSelect'),
+  diagramSelect: document.getElementById('diagramSelect'),
   notification: document.getElementById('notification'),
   resizer: document.getElementById('resizer'),
   editorPanel: document.getElementById('editorPanel'),
@@ -444,17 +444,68 @@ class DiagramRenderer {
       return;
     }
 
-    try {
-      elements.diagramContainer.innerHTML = '';
-      const diagram = Diagram.parse(text);
-      const selectedTheme = elements.themeSelect.value || 'simple';
-      diagram.drawSVG(elements.diagramContainer, { theme: selectedTheme });
+    const selection = elements.diagramSelect.value;
 
-      DiagramRenderer.enhanceSVG();
-      NotificationManager.show('Diagram rendered successfully', 'success');
+    try {
+      if (selection === 'mermaid') {
+        DiagramRenderer.renderMermaid(text);
+      } else if (selection === 'js-sequence-simple') {
+        DiagramRenderer.renderJsSequence(text, 'simple');
+      } else if (selection === 'js-sequence-hand') {
+        DiagramRenderer.renderJsSequence(text, 'hand');
+      }
     } catch (error) {
       DiagramRenderer.showErrorState(error.message);
       throw new Error(`Diagram rendering failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Render js-sequence diagram
+   * @private
+   * @param {string} text - Diagram syntax
+   * @param {string} theme - Theme to use (simple or hand)
+   */
+  static renderJsSequence(text, theme = 'simple') {
+    elements.diagramContainer.innerHTML = '';
+    const diagram = Diagram.parse(text);
+    diagram.drawSVG(elements.diagramContainer, { theme: theme });
+
+    DiagramRenderer.enhanceSVG();
+  }
+
+  /**
+   * Render Mermaid diagram
+   * @private
+   * @param {string} text - Diagram syntax
+   */
+  static async renderMermaid(text) {
+    elements.diagramContainer.innerHTML = '';
+
+    // Create a div for mermaid to render into
+    const renderDiv = document.createElement('div');
+    renderDiv.className = 'mermaid-diagram';
+    renderDiv.style.textAlign = 'center';
+    elements.diagramContainer.appendChild(renderDiv);
+
+    try {
+      // Initialize mermaid if not already done
+      if (typeof mermaid !== 'undefined') {
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: 'default',
+          securityLevel: 'loose'
+        });
+
+        const { svg } = await mermaid.render('mermaid-diagram-' + Date.now(), text);
+        renderDiv.innerHTML = svg;
+
+        DiagramRenderer.enhanceSVG();
+      } else {
+        throw new Error('Mermaid library not loaded');
+      }
+    } catch (error) {
+      throw new Error(`Mermaid rendering failed: ${error.message}`);
     }
   }
 
@@ -465,7 +516,7 @@ class DiagramRenderer {
   static showEmptyState() {
     elements.diagramContainer.innerHTML =
       '<p style="color: #64748b; text-align: center; margin-top: 2rem; font-style: italic;">' +
-      'Enter diagram syntax and click "🚀 Render" to generate your diagram</p>';
+      'Enter diagram syntax and click "Draw" to generate your diagram</p>';
   }
 
   /**
@@ -773,10 +824,10 @@ const handleTextInput = () => {
 };
 
 /**
- * Handle theme selection change
+ * Handle diagram selection change
  */
-const handleThemeChange = () => {
-  // Re-render diagram with new theme if there's content
+const handleDiagramChange = () => {
+  // Re-render diagram with new selection if there's content
   if (elements.diagramText.value.trim()) {
     try {
       DiagramRenderer.render();
@@ -855,7 +906,7 @@ function initializeEventListeners() {
   // Input event listeners
   elements.fileInput?.addEventListener('change', handleFileInputChange);
   elements.diagramText?.addEventListener('input', handleTextInput);
-  elements.themeSelect?.addEventListener('change', handleThemeChange);
+  elements.diagramSelect?.addEventListener('change', handleDiagramChange);
 
   // Diagram interaction
   elements.diagramContainer?.addEventListener('click', handleDiagramClick);

@@ -4,11 +4,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sequence Diagram Editor</title>
+  <title>Diagram Editor</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.13.6/underscore-min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.3.0/raphael.min.js"></script>
   <script src="https://bramp.github.io/js-sequence-diagrams/js/sequence-diagram-min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 
 <body>
@@ -16,8 +17,8 @@
     <header>
       <div class="header-content">
         <div class="logo-section">
-          <h1>Sequence Diagram Editor</h1>
-          <p class="subtitle">Create UML sequence diagrams</p>
+          <h1>Diagram Editor</h1>
+          <p class="subtitle">Create Mermaid or JS-Sequence diagrams</p>
         </div>
         <div class="header-actions">
           <span class="version">v1.0</span>
@@ -27,47 +28,46 @@
 
     <div class="main-content">
       <div class="editor-panel" id="editorPanel">
-        <div class="panel-header">
-          <h3 class="panel-title">📝 Diagram Source</h3>
-        </div>
+
         <div class="toolbar">
           <div class="toolbar-group">
-            <input type="file" id="fileInput" accept=".txt,.seq" style="display: none;">
+            <input type="file" id="fileInput" accept=".txt,.seq,.mmd" style="display: none;">
             <button id="loadBtn" class="btn btn-secondary">📁 Load</button>
             <input type="text" id="filenameInput" placeholder="filename.txt" class="filename-input">
             <button id="saveBtn" class="btn btn-primary">💾 Save</button>
           </div>
           <div class="toolbar-group">
-            <button id="renderBtn" class="btn btn-success">🚀 Render</button>
+            <div class="diagram-selector-wrapper">
+              <select id="diagramSelect" class="diagram-select">
+                <option value="mermaid">Mermaid</option>
+                <option value="js-sequence-simple" selected>js-sequence Simple</option>
+                <option value="js-sequence-hand">js-sequence Hand</option>
+              </select>
+            </div>
+            <button id="renderBtn" class="btn btn-success">🎨 Draw</button>
           </div>
         </div>
 
-        <textarea id="diagramText" class="editor" placeholder="Enter sequence diagram syntax here...
+        <textarea id="diagramText" class="editor" placeholder="Enter diagram syntax here...
 
-Example:
+js-sequence Example:
 Title: Example Sequence Diagram
-
 Alice->Bob: Hello Bob, how are you?
-Note right of Bob: Bob thinksfc
-Bob-->Alice: I am good thanks!"></textarea>
+Note right of Bob: Bob thinks
+Bob-->Alice: I am good thanks!
+
+Mermaid Example:
+sequenceDiagram
+    Alice->>Bob: Hello Bob, how are you?
+    Bob-->>Alice: I am good thanks!"></textarea>
       </div>
 
       <div class="resizer" id="resizer"></div>
-
       <div class="diagram-panel" id="diagramPanel">
-        <div class="panel-header">
-          <h3 class="panel-title">🎨 Diagram Preview</h3>
-        </div>
         <div class="toolbar">
           <div class="toolbar-group">
-            <div class="theme-selector-wrapper">
-              <select id="themeSelect" class="theme-select">
-                <option value="simple">Simple →</option>
-                <option value="hand">Hand-drawn 〰</option>
-              </select>
-            </div>
             <input type="text" id="imageFilename" placeholder="diagram.png" class="filename-input">
-            <button id="savePngBtn" class="btn btn-primary">📷 Export PNG</button>
+            <button id="savePngBtn" class="btn btn-primary">📷 Export</button>
           </div>
           <div class="toolbar-info">
             <span class="hint">💡 Click diagram to copy to clipboard</span>

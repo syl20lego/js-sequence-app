@@ -242,20 +242,20 @@ header {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
-.theme-selector-wrapper {
+.diagram-selector-wrapper {
   display: flex;
   align-items: center;
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-  border: 2px solid #e2e8f0;
+  gap: 0.5rem;
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  border: 2px solid #3b82f6;
   border-radius: 12px;
   padding: 0.5rem 1rem;
-  margin-right: 1rem;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
 }
 
-.theme-selector-wrapper::before {
+.diagram-selector-wrapper::before {
   content: '';
   position: absolute;
   top: 0;
@@ -267,27 +267,26 @@ header {
   transition: opacity 0.3s ease;
 }
 
-.theme-selector-wrapper:hover {
-  border-color: #3b82f6;
+.diagram-selector-wrapper:hover {
+  border-color: #2563eb;
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
   transform: translateY(-1px);
 }
 
-.theme-selector-wrapper:hover::before {
+.diagram-selector-wrapper:hover::before {
   opacity: 1;
 }
 
-.theme-label {
+.selector-label {
   font-weight: 600;
   color: #475569;
   font-size: 0.8rem;
-  margin-right: 0.75rem;
   white-space: nowrap;
   position: relative;
   z-index: 1;
 }
 
-.theme-select {
+.diagram-select {
   border: none;
   background: transparent;
   color: #1e293b;
@@ -296,18 +295,18 @@ header {
   cursor: pointer;
   padding: 0.25rem 0.5rem;
   border-radius: 6px;
-  min-width: 130px;
+  min-width: 160px;
   position: relative;
   z-index: 1;
   transition: all 0.3s ease;
 }
 
-.theme-select:focus {
+.diagram-select:focus {
   outline: none;
   background: rgba(59, 130, 246, 0.1);
 }
 
-.theme-select option {
+.diagram-select option {
   background: #ffffff;
   color: #1e293b;
   padding: 0.5rem;
@@ -413,6 +412,18 @@ header {
 
 .editor::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(135deg, #94a3b8, #64748b);
+}
+
+/* Mermaid diagram styling */
+.mermaid-diagram {
+  padding: 1rem;
+  width: 100%;
+  overflow: auto;
+}
+
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
 }
 
 /* Loading states */
