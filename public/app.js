@@ -630,19 +630,25 @@ class ClipboardManager {
   static svgToBlob(svg) {
     return new Promise((resolve, reject) => {
       const canvas = document.createElement('canvas');
-      const svgData = new XMLSerializer().serializeToString(svg);
+      const { width, height } = ClipboardManager.getSvgRenderSize(svg);
+      const svgData = ClipboardManager.serializeSvgWithSize(svg, width, height);
       const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(svgBlob);
 
       const img = new Image();
       img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
+        const safeWidth = Math.max(1, Math.round(width || img.width || 300));
+        const safeHeight = Math.max(1, Math.round(height || img.height || 150));
+        const scale = window.devicePixelRatio || 1;
+
+        canvas.width = Math.round(safeWidth * scale);
+        canvas.height = Math.round(safeHeight * scale);
 
         const ctx = canvas.getContext('2d');
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
         ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0);
+        ctx.fillRect(0, 0, safeWidth, safeHeight);
+        ctx.drawImage(img, 0, 0, safeWidth, safeHeight);
 
         canvas.toBlob(resolve, 'image/png');
         URL.revokeObjectURL(url);
@@ -655,6 +661,75 @@ class ClipboardManager {
 
       img.src = url;
     });
+  }
+
+  /**
+   * Get the current on-screen size of the SVG
+   * @private
+   * @param {SVGElement} svg - SVG element to measure
+   * @returns {{width: number, height: number}} Render size
+   */
+  static getSvgRenderSize(svg) {
+    const rect = svg.getBoundingClientRect?.();
+    const width = rect?.width || ClipboardManager.parseSvgLength(svg.getAttribute('width')) ||
+      ClipboardManager.getViewBoxSize(svg).width || 300;
+    const height = rect?.height || ClipboardManager.parseSvgLength(svg.getAttribute('height')) ||
+      ClipboardManager.getViewBoxSize(svg).height || 150;
+
+    return { width, height };
+  }
+
+  /**
+   * Serialize SVG while forcing width/height to current render size
+   * @private
+   * @param {SVGElement} svg - SVG element to serialize
+   * @param {number} width - Target width
+   * @param {number} height - Target height
+   * @returns {string} Serialized SVG
+   */
+  static serializeSvgWithSize(svg, width, height) {
+    const clone = svg.cloneNode(true);
+    if (Number.isFinite(width)) {
+      clone.setAttribute('width', `${width}`);
+    }
+    if (Number.isFinite(height)) {
+      clone.setAttribute('height', `${height}`);
+    }
+
+    const viewBox = clone.getAttribute('viewBox');
+    if (!viewBox) {
+      clone.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    }
+
+    return new XMLSerializer().serializeToString(clone);
+  }
+
+  /**
+   * Parse SVG length attribute to number
+   * @private
+   * @param {string|null} value - Length value
+   * @returns {number} Parsed number or 0
+   */
+  static parseSvgLength(value) {
+    if (!value) return 0;
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  /**
+   * Get viewBox size if present
+   * @private
+   * @param {SVGElement} svg - SVG element
+   * @returns {{width: number, height: number}}
+   */
+  static getViewBoxSize(svg) {
+    const viewBox = svg.getAttribute('viewBox');
+    if (!viewBox) return { width: 0, height: 0 };
+    const parts = viewBox.split(/\s+/).map(Number);
+    if (parts.length !== 4 || parts.some((v) => !Number.isFinite(v))) {
+      return { width: 0, height: 0 };
+    }
+    return { width: parts[2], height: parts[3] };
   }
 }
 
