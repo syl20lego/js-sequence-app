@@ -30,6 +30,12 @@ const MIN_PANEL_WIDTH = 300;
 /** @constant {string} LocalStorage key for panel width */
 const STORAGE_KEY_PANEL_WIDTH = 'editorPanelWidth';
 
+/** @constant {string} LocalStorage key for diagram type selection */
+const STORAGE_KEY_DIAGRAM_TYPE = 'diagramType';
+
+/** @constant {string[]} Valid diagram type option values */
+const VALID_DIAGRAM_TYPES = ['mermaid', 'js-sequence-simple', 'js-sequence-hand'];
+
 // =============================================================================
 // DOM ELEMENT REFERENCES
 // =============================================================================
@@ -309,6 +315,8 @@ class FileManager {
     elements.diagramText.value = content;
     elements.filenameInput.value = fileName;
 
+    DiagramTypeSelector.fromFilename(fileName);
+
     appState.setFileInfo(fileName, handle);
     UIManager.updatePngFilename();
     UIManager.updateFileStatus();
@@ -320,17 +328,18 @@ class FileManager {
    * @returns {Promise<void>}
    */
   static async loadWithFilePicker() {
-    const [fileHandle] = await window.showOpenFilePicker({
-      types: [{
-        description: 'Text files',
-        accept: { 'text/plain': ['.txt', '.md', '.seq'] }
-      }]
-    });
+    const [fileHandle] = await window.showOpenFilePicker();
 
     const file = await fileHandle.getFile();
     const content = await file.text();
+    let fileName
+    if (file.name.toLowerCase().endsWith('.txt') && file.name.indexOf('.') !== file.name.toLowerCase().lastIndexOf('.txt')) {
+      fileName = file.name.slice(0, -4);
+    } else {
+      fileName = file.name;
+    }
 
-    FileManager.loadFileContent(content, file.name, fileHandle);
+    FileManager.loadFileContent(content, fileName, fileHandle);
     NotificationManager.show('File loaded from original location', 'success');
   }
 
@@ -344,7 +353,10 @@ class FileManager {
       throw new Error('Cannot save empty diagram');
     }
 
-    if (supportsFileSystemAccess && appState.fileHandle) {
+    const inputFilename = elements.filenameInput.value.trim();
+    const filenameChanged = appState.fileHandle && inputFilename && inputFilename !== appState.fileName;
+
+    if (supportsFileSystemAccess && appState.fileHandle && !filenameChanged) {
       await FileManager.saveToOriginalLocation(content);
     } else if (supportsFileSystemAccess) {
       await FileManager.saveWithFilePicker(content);
@@ -374,14 +386,10 @@ class FileManager {
    * @returns {Promise<void>}
    */
   static async saveWithFilePicker(content) {
-    const filename = appState.fileName || elements.filenameInput.value.trim() || 'diagram.txt';
+    const filename = elements.filenameInput.value.trim() || appState.fileName || 'diagram.txt';
 
     const fileHandle = await window.showSaveFilePicker({
-      suggestedName: filename,
-      types: [{
-        description: 'Text files',
-        accept: { 'text/plain': ['.txt', '.md', '.seq'] }
-      }]
+      suggestedName: filename
     });
 
     const writable = await fileHandle.createWritable();
@@ -399,7 +407,7 @@ class FileManager {
    * @param {string} content - Content to save
    */
   static saveAsDownload(content) {
-    const filename = appState.fileName || elements.filenameInput.value.trim() || 'diagram.txt';
+    const filename = elements.filenameInput.value.trim() || appState.fileName || 'diagram.txt';
 
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -554,16 +562,18 @@ class UIManager {
    * Update file status display
    */
   static updateFileStatus() {
-    if (!appState.fileName) {
+    const displayName = elements.filenameInput.value.trim();
+
+    if (!displayName) {
       elements.saveBtn.textContent = '💾 Save';
       elements.saveBtn.style.backgroundColor = '';
       return;
     }
 
-    const status = appState.hasUnsavedChanges ? ' (unsaved changes)' : ' (saved)';
-    const locationInfo = appState.fileHandle ? ' to original location' : '';
+    const isOriginal = appState.fileHandle && displayName === appState.fileName;
+    const status = appState.hasUnsavedChanges ? ' (unsaved changes)' : ' ';
 
-    elements.saveBtn.textContent = `💾 Save "${appState.fileName}"${status}${locationInfo}`;
+    elements.saveBtn.textContent = `💾 Save "${displayName}"${status}`;
     elements.saveBtn.style.backgroundColor = appState.hasUnsavedChanges ? '#f59e0b' : '#10b981';
   }
 
@@ -583,6 +593,43 @@ class UIManager {
       elements.savePngBtn.textContent = '📷 Export PNG (with picker)';
     } else {
       elements.savePngBtn.textContent = '📷 Export PNG (download)';
+    }
+  }
+}
+
+/**
+ * Diagram type auto-selection utility
+ * @class
+ */
+class DiagramTypeSelector {
+  /**
+   * Update the diagram type selector based on a filename's extension.
+   * - .mmd  → always switches to 'mermaid'
+   * - .jsq  → switches to 'js-sequence-simple' only when a js-sequence type is NOT already selected
+   * - other → no change
+   * Persists any change to localStorage.
+   * @param {string} fileName - The loaded file name
+   */
+  static fromFilename(fileName) {
+    if (!fileName) return;
+
+    const ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+    const current = elements.diagramSelect.value;
+
+    let newType = null;
+
+    if (ext === '.mmd') {
+      newType = 'mermaid';
+    } else if (ext === '.jsq') {
+      const isAlreadyJsSequence = current === 'js-sequence-simple' || current === 'js-sequence-hand';
+      if (!isAlreadyJsSequence) {
+        newType = 'js-sequence-simple';
+      }
+    }
+
+    if (newType && newType !== current) {
+      elements.diagramSelect.value = newType;
+      StorageManager.setItem(STORAGE_KEY_DIAGRAM_TYPE, newType);
     }
   }
 }
@@ -902,6 +949,9 @@ const handleTextInput = () => {
  * Handle diagram selection change
  */
 const handleDiagramChange = () => {
+  // Persist the user's selection
+  StorageManager.setItem(STORAGE_KEY_DIAGRAM_TYPE, elements.diagramSelect.value);
+
   // Re-render diagram with new selection if there's content
   if (elements.diagramText.value.trim()) {
     try {
@@ -982,6 +1032,7 @@ function initializeEventListeners() {
   elements.fileInput?.addEventListener('change', handleFileInputChange);
   elements.diagramText?.addEventListener('input', handleTextInput);
   elements.diagramSelect?.addEventListener('change', handleDiagramChange);
+  elements.filenameInput?.addEventListener('input', () => UIManager.updateFileStatus());
 
   // Diagram interaction
   elements.diagramContainer?.addEventListener('click', handleDiagramClick);
@@ -1004,6 +1055,12 @@ function initializeApplication() {
   try {
     // Load saved preferences
     PanelManager.loadPanelWidths();
+
+    // Restore last selected diagram type
+    const savedType = StorageManager.getItem(STORAGE_KEY_DIAGRAM_TYPE);
+    if (savedType && VALID_DIAGRAM_TYPES.includes(savedType)) {
+      elements.diagramSelect.value = savedType;
+    }
 
     // Initialize event listeners
     initializeEventListeners();
