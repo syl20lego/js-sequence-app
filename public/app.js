@@ -162,7 +162,7 @@ class ErrorHandler {
         if (error.name !== 'AbortError') {
           ErrorHandler.handle(error, errorMessage, context);
         }
-        throw error;
+        return undefined;
       }
     };
   }
@@ -655,7 +655,7 @@ class ClipboardManager {
   }
 
   /**
-   * Copy SVG diagram to clipboard as PNG
+   * Copy SVG diagram to clipboard, preferring PNG and falling back to SVG
    * @param {SVGElement} svg - SVG element to copy
    * @returns {Promise<void>}
    */
@@ -664,8 +664,45 @@ class ClipboardManager {
       throw new Error('Clipboard API not supported in this browser');
     }
 
-    const blob = await ClipboardManager.svgToBlob(svg);
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    try {
+      const pngBlob = await ClipboardManager.svgToBlob(svg);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      return;
+    } catch (error) {
+      if (!ClipboardManager.isCanvasSecurityError(error)) {
+        throw error;
+      }
+    }
+
+    const svgBlob = ClipboardManager.createSvgBlob(svg);
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/svg+xml': svgBlob })]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to copy diagram: PNG export blocked by browser security and SVG fallback failed (${message})`);
+    }
+  }
+
+  /**
+   * Create SVG blob from rendered diagram
+   * @private
+   * @param {SVGElement} svg - SVG element to serialize
+   * @param {number} [width] - Optional width override
+   * @param {number} [height] - Optional height override
+   * @param {boolean} [sanitizeForCanvas=false] - Remove canvas-unsafe external resources
+   * @returns {Blob} SVG blob
+   */
+  static createSvgBlob(svg, width, height, sanitizeForCanvas = false) {
+    const renderSize = Number.isFinite(width) && Number.isFinite(height)
+      ? { width, height }
+      : ClipboardManager.getSvgRenderSize(svg);
+    const svgData = ClipboardManager.serializeSvgWithSize(
+      svg,
+      renderSize.width,
+      renderSize.height,
+      sanitizeForCanvas
+    );
+    return new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
   }
 
   /**
@@ -674,31 +711,73 @@ class ClipboardManager {
    * @param {SVGElement} svg - SVG element to convert
    * @returns {Promise<Blob>} PNG blob
    */
-  static svgToBlob(svg) {
+  static async svgToBlob(svg) {
+    try {
+      return await ClipboardManager.renderSvgToPngBlob(svg, false);
+    } catch (error) {
+      if (!ClipboardManager.isCanvasSecurityError(error)) {
+        throw error;
+      }
+    }
+
+    try {
+      return await ClipboardManager.renderSvgToPngBlob(svg, true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to export PNG: browser blocked external resources in the diagram (${message})`);
+    }
+  }
+
+  /**
+   * Render an SVG to a PNG blob
+   * @private
+   * @param {SVGElement} svg - SVG element to render
+   * @param {boolean} sanitizeForCanvas - Whether to remove canvas-unsafe resources before rendering
+   * @returns {Promise<Blob>} PNG blob
+   */
+  static renderSvgToPngBlob(svg, sanitizeForCanvas) {
     return new Promise((resolve, reject) => {
       const canvas = document.createElement('canvas');
       const { width, height } = ClipboardManager.getSvgRenderSize(svg);
-      const svgData = ClipboardManager.serializeSvgWithSize(svg, width, height);
-      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const svgBlob = ClipboardManager.createSvgBlob(svg, width, height, sanitizeForCanvas);
       const url = URL.createObjectURL(svgBlob);
 
       const img = new Image();
       img.onload = () => {
-        const safeWidth = Math.max(1, Math.round(width || img.width || 300));
-        const safeHeight = Math.max(1, Math.round(height || img.height || 150));
-        const scale = window.devicePixelRatio || 1;
+        try {
+          const safeWidth = Math.max(1, Math.round(width || img.width || 300));
+          const safeHeight = Math.max(1, Math.round(height || img.height || 150));
+          const scale = window.devicePixelRatio || 1;
 
-        canvas.width = Math.round(safeWidth * scale);
-        canvas.height = Math.round(safeHeight * scale);
+          canvas.width = Math.round(safeWidth * scale);
+          canvas.height = Math.round(safeHeight * scale);
 
-        const ctx = canvas.getContext('2d');
-        ctx.setTransform(scale, 0, 0, scale, 0, 0);
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, safeWidth, safeHeight);
-        ctx.drawImage(img, 0, 0, safeWidth, safeHeight);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            throw new Error('Canvas 2D context is not available');
+          }
 
-        canvas.toBlob(resolve, 'image/png');
-        URL.revokeObjectURL(url);
+          ctx.setTransform(scale, 0, 0, scale, 0, 0);
+          ctx.fillStyle = 'white';
+          ctx.fillRect(0, 0, safeWidth, safeHeight);
+          ctx.drawImage(img, 0, 0, safeWidth, safeHeight);
+
+          canvas.toBlob((blob) => {
+            if (!blob) {
+              reject(new Error('Failed to convert SVG to PNG blob'));
+              return;
+            }
+            resolve(blob);
+          }, 'image/png');
+        } catch (error) {
+          if (ClipboardManager.isCanvasSecurityError(error)) {
+            reject(new Error('Canvas export blocked by browser security (tainted canvas)'));
+          } else {
+            reject(error instanceof Error ? error : new Error('Failed to convert SVG to image'));
+          }
+        } finally {
+          URL.revokeObjectURL(url);
+        }
       };
 
       img.onerror = () => {
@@ -708,6 +787,67 @@ class ClipboardManager {
 
       img.src = url;
     });
+  }
+
+  /**
+   * Remove external resources that can taint canvas rendering
+   * @private
+   * @param {SVGElement} svg - Cloned SVG element
+   */
+  static sanitizeSvgForCanvas(svg) {
+    svg.querySelectorAll('foreignObject').forEach((node) => node.remove());
+
+    const allNodes = svg.querySelectorAll('*');
+    allNodes.forEach((node) => {
+      const href = node.getAttribute('href') || node.getAttribute('xlink:href');
+      if (!href) return;
+
+      if (ClipboardManager.isSafeSvgResourceUrl(href)) return;
+
+      if (node.tagName?.toLowerCase() === 'image') {
+        node.remove();
+        return;
+      }
+
+      node.removeAttribute('href');
+      node.removeAttribute('xlink:href');
+    });
+  }
+
+  /**
+   * Check whether an SVG resource URL is safe to keep for canvas rendering
+   * @private
+   * @param {string} value - URL value from href/xlink:href
+   * @returns {boolean} True when URL is local/safe
+   */
+  static isSafeSvgResourceUrl(value) {
+    if (!value) return true;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+      return true;
+    }
+
+    try {
+      const url = new URL(trimmed, window.location.href);
+      return url.origin === window.location.origin;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check whether an error comes from canvas tainting/CORS restrictions
+   * @private
+   * @param {unknown} error - Error to inspect
+   * @returns {boolean} True when canvas export is blocked by browser security
+   */
+  static isCanvasSecurityError(error) {
+    if (!(error instanceof Error)) return false;
+    const message = error.message || '';
+    return error.name === 'SecurityError' ||
+      /tainted canvases may not be exported/i.test(message) ||
+      /canvas export blocked by browser security/i.test(message) ||
+      /tainted canvas/i.test(message);
   }
 
   /**
@@ -732,15 +872,20 @@ class ClipboardManager {
    * @param {SVGElement} svg - SVG element to serialize
    * @param {number} width - Target width
    * @param {number} height - Target height
+   * @param {boolean} [sanitizeForCanvas=false] - Remove canvas-unsafe resources before serialization
    * @returns {string} Serialized SVG
    */
-  static serializeSvgWithSize(svg, width, height) {
+  static serializeSvgWithSize(svg, width, height, sanitizeForCanvas = false) {
     const clone = svg.cloneNode(true);
     if (Number.isFinite(width)) {
       clone.setAttribute('width', `${width}`);
     }
     if (Number.isFinite(height)) {
       clone.setAttribute('height', `${height}`);
+    }
+
+    if (sanitizeForCanvas) {
+      ClipboardManager.sanitizeSvgForCanvas(clone);
     }
 
     const viewBox = clone.getAttribute('viewBox');
@@ -838,7 +983,6 @@ const handlePngExportClick = ErrorHandler.asyncWrapper(async () => {
   }
 
   const blob = await ClipboardManager.svgToBlob(svg);
-
   if (supportsFileSystemAccess) {
     await PngExporter.saveWithFilePicker(blob);
   } else {
@@ -852,15 +996,55 @@ const handlePngExportClick = ErrorHandler.asyncWrapper(async () => {
  */
 class PngExporter {
   /**
+   * Generate base filename without extension
+   * @returns {string} Base filename
+   */
+  static generateBaseFilename() {
+    if (appState.fileName) {
+      return appState.fileName.replace(/\.[^/.]+$/, '');
+    }
+
+    const inputName = elements.imageFilename.value.trim();
+    if (!inputName) return 'diagram';
+    return inputName.replace(/\.[^/.]+$/, '');
+  }
+
+  /**
    * Generate PNG filename based on current file
    * @returns {string} Generated filename
    */
   static generateFilename() {
-    if (appState.fileName) {
-      const baseName = appState.fileName.replace(/\.[^/.]+$/, '');
-      return `${baseName}.png`;
+    return `${PngExporter.generateBaseFilename()}.png`;
+  }
+
+  /**
+   * Resolve preferred start directory for save picker
+   * @returns {Promise<FileSystemDirectoryHandle|undefined>}
+   */
+  static async resolveStartInDirectory() {
+    if (appState.fileHandle) {
+      try {
+        return (await appState.fileHandle.getParent?.()) || undefined;
+      } catch {
+        return appState.lastPngDirectory || undefined;
+      }
     }
-    return elements.imageFilename.value.trim() || 'diagram.png';
+    return appState.lastPngDirectory || undefined;
+  }
+
+  /**
+   * Build safe save picker options without invalid null startIn values
+   * @param {string} suggestedName - Suggested file name
+   * @param {Array<{description: string, accept: Object<string, string[]>}>} types - Allowed file types
+   * @param {FileSystemDirectoryHandle|undefined} startIn - Optional start directory
+   * @returns {Object} Save picker options
+   */
+  static buildSavePickerOptions(suggestedName, types, startIn) {
+    const options = { suggestedName, types };
+    if (startIn !== undefined && startIn !== null) {
+      options.startIn = startIn;
+    }
+    return options;
   }
 
   /**
@@ -870,26 +1054,15 @@ class PngExporter {
    */
   static async saveWithFilePicker(blob) {
     const suggestedName = PngExporter.generateFilename();
+    const startIn = await PngExporter.resolveStartInDirectory();
+    const types = [{
+      description: 'PNG images',
+      accept: { 'image/png': ['.png'] }
+    }];
 
-    let startIn;
-    if (appState.fileHandle) {
-      try {
-        startIn = await appState.fileHandle.getParent?.();
-      } catch {
-        startIn = appState.lastPngDirectory;
-      }
-    } else {
-      startIn = appState.lastPngDirectory;
-    }
-
-    const fileHandle = await window.showSaveFilePicker({
-      suggestedName,
-      startIn,
-      types: [{
-        description: 'PNG images',
-        accept: { 'image/png': ['.png'] }
-      }]
-    });
+    const fileHandle = await window.showSaveFilePicker(
+      PngExporter.buildSavePickerOptions(suggestedName, types, startIn)
+    );
 
     const writable = await fileHandle.createWritable();
     await writable.write(blob);
