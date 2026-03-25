@@ -502,7 +502,9 @@ class DiagramRenderer {
         mermaid.initialize({
           startOnLoad: false,
           theme: 'default',
-          securityLevel: 'loose'
+          securityLevel: 'loose',
+          // Use native SVG text instead of foreignObject labels so PNG export/copy keeps text.
+          flowchart: { htmlLabels: false }
         });
 
         const { svg } = await mermaid.render('mermaid-diagram-' + Date.now(), text);
@@ -664,22 +666,23 @@ class ClipboardManager {
       throw new Error('Clipboard API not supported in this browser');
     }
 
+    let pngError = null;
+
     try {
       const pngBlob = await ClipboardManager.svgToBlob(svg);
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
       return;
     } catch (error) {
-      if (!ClipboardManager.isCanvasSecurityError(error)) {
-        throw error;
-      }
+      pngError = error instanceof Error ? error : new Error(String(error));
     }
 
     const svgBlob = ClipboardManager.createSvgBlob(svg);
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'image/svg+xml': svgBlob })]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to copy diagram: PNG export blocked by browser security and SVG fallback failed (${message})`);
+      const svgMessage = error instanceof Error ? error.message : String(error);
+      const pngMessage = pngError?.message || 'unknown PNG export failure';
+      throw new Error(`Failed to copy diagram: PNG export failed (${pngMessage}) and SVG fallback failed (${svgMessage})`);
     }
   }
 
@@ -712,19 +715,21 @@ class ClipboardManager {
    * @returns {Promise<Blob>} PNG blob
    */
   static async svgToBlob(svg) {
+    const preferSanitizedRender = ClipboardManager.containsForeignObject(svg);
+
     try {
-      return await ClipboardManager.renderSvgToPngBlob(svg, false);
+      return await ClipboardManager.renderSvgToPngBlob(svg, preferSanitizedRender);
     } catch (error) {
-      if (!ClipboardManager.isCanvasSecurityError(error)) {
+      if (!ClipboardManager.isCanvasSecurityError(error) && !preferSanitizedRender) {
         throw error;
       }
     }
 
     try {
-      return await ClipboardManager.renderSvgToPngBlob(svg, true);
+      return await ClipboardManager.renderSvgToPngBlob(svg, !preferSanitizedRender);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to export PNG: browser blocked external resources in the diagram (${message})`);
+      throw new Error(`Failed to export PNG: ${message}`);
     }
   }
 
@@ -789,13 +794,17 @@ class ClipboardManager {
     });
   }
 
+  static containsForeignObject(svg) {
+    return svg.querySelector('foreignObject') !== null;
+  }
+
   /**
    * Remove external resources that can taint canvas rendering
    * @private
    * @param {SVGElement} svg - Cloned SVG element
    */
   static sanitizeSvgForCanvas(svg) {
-    svg.querySelectorAll('foreignObject').forEach((node) => node.remove());
+    ClipboardManager.replaceForeignObjectWithSvgText(svg);
 
     const allNodes = svg.querySelectorAll('*');
     allNodes.forEach((node) => {
@@ -812,6 +821,110 @@ class ClipboardManager {
       node.removeAttribute('href');
       node.removeAttribute('xlink:href');
     });
+  }
+
+  /**
+   * Replace HTML foreignObject labels with plain SVG text for reliable PNG export
+   * @private
+   * @param {SVGElement} svg - Cloned SVG element
+   */
+  static replaceForeignObjectWithSvgText(svg) {
+    const foreignObjects = Array.from(svg.querySelectorAll('foreignObject'));
+
+    foreignObjects.forEach((node) => {
+      const labelText = ClipboardManager.getForeignObjectText(node);
+      if (!labelText) {
+        node.remove();
+        return;
+      }
+
+      const x = ClipboardManager.parseSvgLength(node.getAttribute('x'));
+      const y = ClipboardManager.parseSvgLength(node.getAttribute('y'));
+      const width = ClipboardManager.parseSvgLength(node.getAttribute('width'));
+      const height = ClipboardManager.parseSvgLength(node.getAttribute('height'));
+      const centerX = x + (width > 0 ? width / 2 : 0);
+      const centerY = y + (height > 0 ? height / 2 : 0);
+
+      const textNode = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      const className = node.getAttribute('class');
+      if (className) {
+        textNode.setAttribute('class', className);
+      }
+
+      textNode.setAttribute('x', `${centerX}`);
+      textNode.setAttribute('y', `${centerY}`);
+      textNode.setAttribute('text-anchor', 'middle');
+      textNode.setAttribute('dominant-baseline', 'middle');
+      textNode.setAttribute('fill', '#1f2937');
+      textNode.setAttribute('font-family', 'Arial, sans-serif');
+      textNode.setAttribute('font-size', '14');
+      textNode.setAttribute('pointer-events', 'none');
+
+      const maxCharsPerLine = Math.max(10, Math.floor((width || 140) / 7));
+      const lines = ClipboardManager.wrapTextForSvg(labelText, maxCharsPerLine);
+
+      if (lines.length <= 1) {
+        textNode.textContent = lines[0];
+      } else {
+        const lineHeightEm = 1.2;
+        const firstDy = ((1 - lines.length) / 2) * lineHeightEm;
+
+        lines.forEach((line, index) => {
+          const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+          tspan.setAttribute('x', `${centerX}`);
+          tspan.setAttribute('dy', `${index === 0 ? firstDy : lineHeightEm}em`);
+          tspan.textContent = line;
+          textNode.appendChild(tspan);
+        });
+      }
+
+      node.replaceWith(textNode);
+    });
+  }
+
+  /**
+   * Extract readable label text from foreignObject content
+   * @private
+   * @param {Element} foreignObject - foreignObject element
+   * @returns {string} Normalized text content
+   */
+  static getForeignObjectText(foreignObject) {
+    return (foreignObject.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Wrap text to fit inside SVG node boxes
+   * @private
+   * @param {string} text - Label text
+   * @param {number} maxCharsPerLine - Approximate width cap in characters
+   * @returns {string[]} Wrapped lines
+   */
+  static wrapTextForSvg(text, maxCharsPerLine) {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (!normalized) return [''];
+    if (normalized.length <= maxCharsPerLine) return [normalized];
+
+    const words = normalized.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    words.forEach((word) => {
+      const candidate = currentLine ? `${currentLine} ${word}` : word;
+      if (candidate.length <= maxCharsPerLine || !currentLine) {
+        currentLine = candidate;
+      } else {
+        lines.push(currentLine);
+        currentLine = word;
+      }
+    });
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    return lines;
   }
 
   /**
@@ -877,6 +990,13 @@ class ClipboardManager {
    */
   static serializeSvgWithSize(svg, width, height, sanitizeForCanvas = false) {
     const clone = svg.cloneNode(true);
+    if (!clone.getAttribute('xmlns')) {
+      clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    }
+    if (!clone.getAttribute('xmlns:xlink')) {
+      clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    }
+
     if (Number.isFinite(width)) {
       clone.setAttribute('width', `${width}`);
     }
